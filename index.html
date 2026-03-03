@@ -3,36 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบเช็คชื่อรถโรงเรียน v2</title>
+    <title>ระบบเช็คชื่ออัจฉริยะ v3</title>
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; padding: 20px; }
-        .container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 600px; text-align: center; }
-        video { width: 100%; border-radius: 10px; background: #000; }
-        #status { margin: 15px 0; font-weight: bold; color: #1a73e8; }
-        .reg-box { margin-top: 20px; padding: 20px; border: 2px dashed #ccc; border-radius: 10px; background: #fafafa; }
-        input, button { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ddd; }
-        button { background: #28a745; color: white; cursor: pointer; border: none; }
-        button:hover { background: #218838; }
+        body { font-family: 'Tahoma', sans-serif; display: flex; flex-direction: column; align-items: center; background: #eef2f3; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 100%; max-width: 600px; text-align: center; }
+        .video-box { position: relative; background: #000; border-radius: 15px; overflow: hidden; line-height: 0; }
+        video { width: 100%; height: auto; }
+        #status { margin: 15px 0; padding: 10px; border-radius: 10px; font-weight: bold; background: #fff3cd; color: #856404; }
+        .reg-box { margin-top: 25px; padding: 20px; border: 2px solid #e0e0e0; border-radius: 15px; background: #ffffff; }
+        input[type="text"] { width: 80%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; }
+        .btn-reg { background: #28a745; color: white; padding: 10px 25px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🚌 ระบบเช็คชื่อ & ลงทะเบียน</h2>
+    <h2>🚌 ระบบเช็คชื่อรถโรงเรียน</h2>
     <div id="status">กำลังเริ่มต้นระบบ...</div>
 
-    <div style="position: relative; line-height: 0;">
+    <div class="video-box">
         <video id="video" autoplay muted playsinline></video>
     </div>
 
     <div class="reg-box">
         <h3>➕ ลงทะเบียนเด็กใหม่</h3>
-        <input type="text" id="newName" placeholder="ชื่อเด็ก (ภาษาอังกฤษ)">
+        <input type="text" id="newName" placeholder="ใส่ชื่อภาษาอังกฤษ (เช่น Somchai)">
         <br>
         <input type="file" id="filePicker" accept="image/*">
         <br>
-        <button onclick="uploadNewStudent()">💾 บันทึกรูปและชื่อ</button>
+        <button class="btn-reg" onclick="uploadNewStudent()">💾 บันทึกรูปและชื่อ</button>
     </div>
 </div>
 
@@ -40,56 +40,65 @@
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
     
-    // *** สำคัญ: ใส่ URL ของ Google Apps Script ของคุณที่นี่ ***
-    const SCRIPT_URL = 'ใส่_URL_WEB_APP_ของ_APPS_SCRIPT_ตรงนี้';
+    // *** สำคัญ: นำ URL Web App จาก Google Apps Script มาใส่ตรงนี้ ***
+    const SCRIPT_URL = 'ใส่_URL_WEB_APP_ของคุณตรงนี้';
 
-    async function startApp() {
-        statusDiv.innerText = "⏳ กำลังโหลดสมองกล AI...";
+    async function init() {
+        statusDiv.innerText = "⏳ กำลังโหลด AI...";
         try {
-            await Promise.all([
-                faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
-                faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
-                faceapi.nets.faceRecognitionNet.loadFromUri('./models')
-            ]);
+            // โหลดเฉพาะ Models ที่คุณมีในโฟลเดอร์ models
+            await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
+            await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
+            await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
 
-            statusDiv.innerText = "📷 กำลังเปิดกล้อง...";
+            // เปิดกล้อง
             const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
             video.srcObject = stream;
 
-            statusDiv.innerText = "🔎 กำลังดึงรูปเด็กจาก Google Drive...";
-            const labeledFaceDescriptors = await loadImagesFromDrive();
+            // ดึงข้อมูลเด็กจากฐานข้อมูล Google Drive
+            statusDiv.innerText = "🔎 กำลังตรวจสอบฐานข้อมูลเด็ก...";
+            const labeledFaceDescriptors = await loadFromDrive();
             
             if (labeledFaceDescriptors.length === 0) {
-                statusDiv.innerText = "⚠️ ยังไม่มีข้อมูลเด็กในระบบ กรุณาลงทะเบียนด้านล่าง";
+                statusDiv.style.background = "#d1ecf1";
+                statusDiv.style.color = "#0c5460";
+                statusDiv.innerText = "📢 ระบบว่างเปล่า กรุณาลงทะเบียนเด็กใหม่ด้านล่าง";
             } else {
-                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
-                statusDiv.innerText = "✅ พร้อมสแกนหน้า!";
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.55); // 0.55 คือค่าความเข้มงวด
+                statusDiv.style.background = "#d4edda";
+                statusDiv.style.color = "#155724";
+                statusDiv.innerText = "✅ พร้อมสแกน! ระบบรู้จักเด็กทั้งหมด " + labeledFaceDescriptors.length + " คน";
                 startScanning(faceMatcher);
             }
         } catch (err) {
             statusDiv.innerText = "❌ เกิดข้อผิดพลาด: " + err;
+            console.error(err);
         }
     }
 
-    // ฟังก์ชันดึงรูปจาก Google Drive (ผ่าน doGet ใน Apps Script)
-    async function loadImagesFromDrive() {
-        const response = await fetch(SCRIPT_URL);
-        const students = await response.json(); // จะได้ลิสต์ {name, id}
-        
-        return Promise.all(
-            students.map(async (student) => {
-                const descriptions = [];
-                try {
-                    // สร้าง URL รูปภาพตรงๆ จาก Google Drive ID
-                    const imgUrl = `https://drive.google.com/uc?export=view&id=${student.id}`;
-                    const img = await faceapi.fetchImage(imgUrl);
-                    const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
-                        .withFaceLandmarks().withFaceDescriptor();
-                    if (detections) descriptions.push(detections.descriptor);
-                } catch (e) { console.error("โหลดรูปไม่สำเร็จ:", student.name); }
-                return new faceapi.LabeledFaceDescriptors(student.name, descriptions);
-            })
-        );
+    async function loadFromDrive() {
+        try {
+            const response = await fetch(SCRIPT_URL);
+            const students = await response.json();
+            
+            if (!students || students.length === 0) return [];
+
+            return Promise.all(
+                students.map(async (student) => {
+                    const descriptions = [];
+                    try {
+                        const imgUrl = `https://drive.google.com/uc?export=view&id=${student.id}`;
+                        const img = await faceapi.fetchImage(imgUrl);
+                        const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+                            .withFaceLandmarks().withFaceDescriptor();
+                        if (detections) descriptions.push(detections.descriptor);
+                    } catch (e) { console.error("โหลดรูปไม่ได้:", student.name); }
+                    return new faceapi.LabeledFaceDescriptors(student.name, descriptions);
+                })
+            );
+        } catch (e) {
+            return [];
+        }
     }
 
     function startScanning(faceMatcher) {
@@ -99,40 +108,46 @@
             
             detections.forEach(async d => {
                 const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-                if (bestMatch.label !== 'unknown') {
+                // ถ้า AI มั่นใจเกิน 45% และไม่ใช่ unknown
+                if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.45) {
                     statusDiv.innerText = "🎯 พบ: " + bestMatch.label;
-                    // ส่งข้อมูลเช็คชื่อไปที่ Sheet
+                    statusDiv.style.background = "#cce5ff";
+                    
+                    // บันทึกลง Sheet (ยิงไปเฉยๆ ไม่ต้องรอผล)
                     fetch(SCRIPT_URL, {
                         method: 'POST',
                         body: JSON.stringify({ name: bestMatch.label, status: 'ขึ้นรถ' })
                     });
                 }
             });
-        }, 1500);
+        }, 2000); // สแกนทุก 2 วินาที เพื่อไม่ให้เครื่องค้าง
     }
 
-    // ฟังก์ชันส่งรูปไปบันทึกใน Drive
     async function uploadNewStudent() {
-        const name = document.getElementById('newName').value;
+        const name = document.getElementById('newName').value.trim();
         const fileInput = document.getElementById('filePicker');
-        if (!name || !fileInput.files[0]) return alert("กรุณากรอกชื่อและเลือกรูป");
+        if (!name || !fileInput.files[0]) return alert("กรุณาใส่ชื่อ (อังกฤษ) และเลือกรูปภาพ");
 
-        statusDiv.innerText = "🚀 กำลังส่งรูปไปที่ Google Drive...";
+        statusDiv.innerText = "🚀 กำลังอัปโหลดข้อมูล...";
         const reader = new FileReader();
         reader.onload = async (e) => {
             const base64Data = e.target.result;
-            await fetch(SCRIPT_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                body: JSON.stringify({ action: 'register', name: name, image: base64Data })
-            });
-            alert("ลงทะเบียนน้อง " + name + " สำเร็จ! ระบบจะรีโหลด");
-            location.reload();
+            try {
+                await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: JSON.stringify({ action: 'register', name: name, image: base64Data })
+                });
+                alert("บันทึกเด็กใหม่เรียบร้อย! ระบบจะเริ่มต้นใหม่");
+                location.reload();
+            } catch (err) {
+                alert("เกิดปัญหาในการส่งข้อมูล");
+            }
         };
         reader.readAsDataURL(fileInput.files[0]);
     }
 
-    window.onload = startApp;
+    window.onload = init;
 </script>
 </body>
 </html>
