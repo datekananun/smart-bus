@@ -3,152 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบเช็คชื่ออัจฉริยะ v3</title>
+    <title>ระบบเช็คชื่อรถโรงเรียน</title>
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { font-family: 'Tahoma', sans-serif; display: flex; flex-direction: column; align-items: center; background: #eef2f3; padding: 20px; }
-        .container { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 100%; max-width: 600px; text-align: center; }
-        .video-box { position: relative; background: #000; border-radius: 15px; overflow: hidden; line-height: 0; }
-        video { width: 100%; height: auto; }
-        #status { margin: 15px 0; padding: 10px; border-radius: 10px; font-weight: bold; background: #fff3cd; color: #856404; }
-        .reg-box { margin-top: 25px; padding: 20px; border: 2px solid #e0e0e0; border-radius: 15px; background: #ffffff; }
-        input[type="text"] { width: 80%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; }
-        .btn-reg { background: #28a745; color: white; padding: 10px 25px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 500px; text-align: center; }
+        video { width: 100%; border-radius: 10px; background: #000; }
+        #status { margin: 15px 0; padding: 10px; font-weight: bold; border-radius: 8px; background: #e8f0fe; }
+        .student-list { margin-top: 20px; text-align: left; }
+        .tag { display: inline-block; padding: 5px 10px; margin: 3px; border-radius: 15px; background: #fee2e2; color: #dc2626; font-size: 14px; border: 1px solid #fecaca; }
+        .reg-box { margin-top: 20px; padding: 15px; border-top: 1px solid #eee; background: #fafafa; border-radius: 10px; }
+        input, button { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ddd; }
+        button { background: #059669; color: white; border: none; cursor: pointer; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🚌 ระบบเช็คชื่อรถโรงเรียน</h2>
-    <div id="status">กำลังเริ่มต้นระบบ...</div>
+    <h2>🚌 เช็คชื่อรอบ เช้า/เย็น</h2>
+    <div id="status">กำลังโหลดระบบ AI...</div>
 
-    <div class="video-box">
+    <div style="position: relative; line-height: 0;">
         <video id="video" autoplay muted playsinline></video>
     </div>
 
+    <div class="student-list">
+        <strong>📍 รายชื่อที่ยังไม่เช็คชื่อ:</strong>
+        <div id="missing-list" style="margin-top:10px;"></div>
+    </div>
+
     <div class="reg-box">
-        <h3>➕ ลงทะเบียนเด็กใหม่</h3>
-        <input type="text" id="newName" placeholder="ใส่ชื่อภาษาอังกฤษ (เช่น Somchai)">
-        <br>
+        <h4>➕ ลงทะเบียนเด็กใหม่</h4>
+        <input type="text" id="newName" placeholder="ชื่อเล่นเด็ก">
         <input type="file" id="filePicker" accept="image/*">
-        <br>
-        <button class="btn-reg" onclick="uploadNewStudent()">💾 บันทึกรูปและชื่อ</button>
+        <button onclick="uploadNew()">บันทึกข้อมูล</button>
     </div>
 </div>
 
 <script>
+    const SCRIPT_URL = 'ใส่_URL_WEB_APP_ของคุณตรงนี้';
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
-    
-    // *** สำคัญ: นำ URL Web App จาก Google Apps Script มาใส่ตรงนี้ ***
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhxsGrq-wUtYwqgp3rlR0JDfYkrM3SMqZ73qzwvQcZalXUZz4S1p4uH-uZrqfnGXM/exec';
+    let pendingStudents = [];
 
     async function init() {
-        statusDiv.innerText = "⏳ กำลังโหลด AI...";
         try {
-            // โหลดเฉพาะ Models ที่คุณมีในโฟลเดอร์ models
-            await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
-            await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
-            await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
-
+            // โหลด Models
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
+                faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+                faceapi.nets.faceRecognitionNet.loadFromUri('./models')
+            ]);
+            
             // เปิดกล้อง
             const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
             video.srcObject = stream;
 
-            // ดึงข้อมูลเด็กจากฐานข้อมูล Google Drive
-            statusDiv.innerText = "🔎 กำลังตรวจสอบฐานข้อมูลเด็ก...";
-            const labeledFaceDescriptors = await loadFromDrive();
+            statusDiv.innerText = "🔎 กำลังดึงข้อมูลจากระบบ...";
+            const descriptors = await loadFromDrive();
             
-            if (labeledFaceDescriptors.length === 0) {
-                statusDiv.style.background = "#d1ecf1";
-                statusDiv.style.color = "#0c5460";
-                statusDiv.innerText = "📢 ระบบว่างเปล่า กรุณาลงทะเบียนเด็กใหม่ด้านล่าง";
+            if (descriptors.length > 0) {
+                pendingStudents = descriptors.map(d => d.label);
+                updateUI();
+                const faceMatcher = new faceapi.FaceMatcher(descriptors, 0.55);
+                statusDiv.innerText = "✅ พร้อมสแกนหน้า";
+                startScan(faceMatcher);
             } else {
-                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.55); // 0.55 คือค่าความเข้มงวด
-                statusDiv.style.background = "#d4edda";
-                statusDiv.style.color = "#155724";
-                statusDiv.innerText = "✅ พร้อมสแกน! ระบบรู้จักเด็กทั้งหมด " + labeledFaceDescriptors.length + " คน";
-                startScanning(faceMatcher);
+                statusDiv.innerText = "⚠️ ยังไม่มีเด็กในระบบ กรุณาลงทะเบียน";
             }
-        } catch (err) {
-            statusDiv.innerText = "❌ เกิดข้อผิดพลาด: " + err;
-            console.error(err);
-        }
+        } catch (e) { statusDiv.innerText = "❌ เกิดข้อผิดพลาด: " + e; }
     }
 
     async function loadFromDrive() {
-        try {
-            const response = await fetch(SCRIPT_URL);
-            const students = await response.json();
-            
-            if (!students || students.length === 0) return [];
-
-            return Promise.all(
-                students.map(async (student) => {
-                    const descriptions = [];
-                    try {
-                        const imgUrl = `https://drive.google.com/uc?export=view&id=${student.id}`;
-                        const img = await faceapi.fetchImage(imgUrl);
-                        const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
-                            .withFaceLandmarks().withFaceDescriptor();
-                        if (detections) descriptions.push(detections.descriptor);
-                    } catch (e) { console.error("โหลดรูปไม่ได้:", student.name); }
-                    return new faceapi.LabeledFaceDescriptors(student.name, descriptions);
-                })
-            );
-        } catch (e) {
-            return [];
-        }
+        const res = await fetch(SCRIPT_URL);
+        const data = await res.json();
+        return Promise.all(data.map(async s => {
+            try {
+                const img = await faceapi.fetchImage(`https://drive.google.com/uc?export=view&id=${s.id}`);
+                const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+                return det ? new faceapi.LabeledFaceDescriptors(s.name, [det.descriptor]) : null;
+            } catch (err) { return null; }
+        })).then(results => results.filter(r => r !== null));
     }
 
-    function startScanning(faceMatcher) {
+    function updateUI() {
+        const list = document.getElementById('missing-list');
+        list.innerHTML = pendingStudents.map(s => `<span class="tag">${s}</span>`).join('');
+    }
+
+    function speak(name) {
+        const utter = new SpeechSynthesisUtterance("พบคุณ " + name + " ขึ้นรถเรียบร้อยแล้วค่ะ");
+        utter.lang = 'th-TH';
+        window.speechSynthesis.speak(utter);
+    }
+
+    function startScan(faceMatcher) {
         setInterval(async () => {
-            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks().withFaceDescriptors();
-            
-            detections.forEach(async d => {
-                const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-                // ถ้า AI มั่นใจเกิน 45% และไม่ใช่ unknown
-                if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.45) {
-                    statusDiv.innerText = "🎯 พบ: " + bestMatch.label;
-                    statusDiv.style.background = "#cce5ff";
-                    
-                    // บันทึกลง Sheet (ยิงไปเฉยๆ ไม่ต้องรอผล)
-                    fetch(SCRIPT_URL, {
-                        method: 'POST',
-                        body: JSON.stringify({ name: bestMatch.label, status: 'ขึ้นรถ' })
-                    });
+            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
+            detections.forEach(d => {
+                const match = faceMatcher.findBestMatch(d.descriptor);
+                if (match.label !== 'unknown' && pendingStudents.includes(match.label)) {
+                    speak(match.label); // พูดชื่อไทย
+                    pendingStudents = pendingStudents.filter(s => s !== match.label); // ลบออกจากรายการแดง
+                    updateUI();
+                    statusDiv.innerText = "🎯 พบ: " + match.label;
+                    // บันทึกลง Google Sheet
+                    fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ name: match.label }) });
                 }
             });
-        }, 2000); // สแกนทุก 2 วินาที เพื่อไม่ให้เครื่องค้าง
+        }, 1500);
     }
 
-    async function uploadNewStudent() {
-        const name = document.getElementById('newName').value.trim();
-        const fileInput = document.getElementById('filePicker');
-        if (!name || !fileInput.files[0]) return alert("กรุณาใส่ชื่อ (อังกฤษ) และเลือกรูปภาพ");
-
-        statusDiv.innerText = "🚀 กำลังอัปโหลดข้อมูล...";
+    async function uploadNew() {
+        const name = document.getElementById('newName').value;
+        const file = document.getElementById('filePicker').files[0];
+        if(!name || !file) return alert("กรุณาใส่ชื่อและเลือกรูป");
+        
+        statusDiv.innerText = "🚀 กำลังบันทึกข้อมูล...";
         const reader = new FileReader();
         reader.onload = async (e) => {
-            const base64Data = e.target.result;
-            try {
-                await fetch(SCRIPT_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    body: JSON.stringify({ action: 'register', name: name, image: base64Data })
-                });
-                alert("บันทึกเด็กใหม่เรียบร้อย! ระบบจะเริ่มต้นใหม่");
-                location.reload();
-            } catch (err) {
-                alert("เกิดปัญหาในการส่งข้อมูล");
-            }
+            await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action:'register', name: name, image: e.target.result }) });
+            alert("บันทึกสำเร็จ!"); 
+            location.reload();
         };
-        reader.readAsDataURL(fileInput.files[0]);
+        reader.readAsDataURL(file);
     }
 
     window.onload = init;
 </script>
 </body>
 </html>
-
