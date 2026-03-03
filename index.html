@@ -3,53 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบเช็คชื่อสแกนใบหน้าบนรถโรงเรียน</title>
-    
+    <title>ระบบเช็คชื่อรถโรงเรียน v2</title>
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-    
     <style>
-        body { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            font-family: sans-serif; 
-            background-color: #f4f7f6;
-            padding: 20px;
-        }
-        .container {
-            background: white;
-            padding: 20px;
-            border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        #status { 
-            margin: 15px 0;
-            font-weight: bold;
-            color: #d93025; /* สีแดงไว้ก่อนจนกว่าจะโหลดเสร็จ */
-        }
-        .video-box {
-            position: relative;
-            background: #000;
-            line-height: 0;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        video {
-            width: 100%;
-            max-width: 600px;
-            height: auto;
-        }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 600px; text-align: center; }
+        video { width: 100%; border-radius: 10px; background: #000; }
+        #status { margin: 15px 0; font-weight: bold; color: #1a73e8; }
+        .reg-box { margin-top: 20px; padding: 20px; border: 2px dashed #ccc; border-radius: 10px; background: #fafafa; }
+        input, button { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ddd; }
+        button { background: #28a745; color: white; cursor: pointer; border: none; }
+        button:hover { background: #218838; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🚌 ระบบเช็คชื่อสแกนใบหน้า</h2>
-    <div id="status">กำลังรอระบบ...</div>
+    <h2>🚌 ระบบเช็คชื่อ & ลงทะเบียน</h2>
+    <div id="status">กำลังเริ่มต้นระบบ...</div>
 
-    <div class="video-box">
+    <div style="position: relative; line-height: 0;">
         <video id="video" autoplay muted playsinline></video>
+    </div>
+
+    <div class="reg-box">
+        <h3>➕ ลงทะเบียนเด็กใหม่</h3>
+        <input type="text" id="newName" placeholder="ชื่อเด็ก (ภาษาอังกฤษ)">
+        <br>
+        <input type="file" id="filePicker" accept="image/*">
+        <br>
+        <button onclick="uploadNewStudent()">💾 บันทึกรูปและชื่อ</button>
     </div>
 </div>
 
@@ -57,112 +40,99 @@
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
     
-    // 1. URL จาก Google Apps Script
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhxsGrq-wUtYwqgp3rlR0JDfYkrM3SMqZ73qzwvQcZalXUZz4S1p4uH-uZrqfnGXM/exec';
-
-    // 2. รายชื่อเด็ก (ชื่อโฟลเดอร์ใน labeled_images)
-    const LABELS = ['Somchai', 'Somsak']; 
+    // *** สำคัญ: ใส่ URL ของ Google Apps Script ของคุณที่นี่ ***
+    const SCRIPT_URL = 'ใส่_URL_WEB_APP_ของ_APPS_SCRIPT_ตรงนี้';
 
     async function startApp() {
-        statusDiv.innerText = '⏳ กำลังโหลด AI (ขั้นตอนนี้อาจใช้เวลาสักครู่)...';
-        
+        statusDiv.innerText = "⏳ กำลังโหลดสมองกล AI...";
         try {
-            // เช็คว่า faceapi โหลดมาหรือยัง
-            if (typeof faceapi === 'undefined') {
-                throw new Error("Library face-api ยังโหลดไม่สำเร็จ กรุณาเช็คอินเทอร์เน็ต");
-            }
-
-            // โหลดเฉพาะไฟล์ที่คุณมีในเครื่อง (ตัด ssdMobilenetv1 ออก)
             await Promise.all([
                 faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
                 faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
                 faceapi.nets.faceRecognitionNet.loadFromUri('./models')
             ]);
 
-            statusDiv.innerText = '📷 โหลด AI สำเร็จ! กำลังเปิดกล้อง...';
-            
-            // เปิดกล้อง
+            statusDiv.innerText = "📷 กำลังเปิดกล้อง...";
             const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
             video.srcObject = stream;
 
-            // เตรียมข้อมูลใบหน้า
-            statusDiv.innerText = '🔎 กำลังประมวลผลรูปต้นแบบ...';
-            const labeledFaceDescriptors = await loadImages();
+            statusDiv.innerText = "🔎 กำลังดึงรูปเด็กจาก Google Drive...";
+            const labeledFaceDescriptors = await loadImagesFromDrive();
             
             if (labeledFaceDescriptors.length === 0) {
-                throw new Error("ไม่สามารถโหลดรูปต้นแบบจาก labeled_images ได้");
+                statusDiv.innerText = "⚠️ ยังไม่มีข้อมูลเด็กในระบบ กรุณาลงทะเบียนด้านล่าง";
+            } else {
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+                statusDiv.innerText = "✅ พร้อมสแกนหน้า!";
+                startScanning(faceMatcher);
             }
-
-            const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
-
-            statusDiv.style.color = 'green';
-            statusDiv.innerText = '✅ พร้อมสแกน! กรุณามองที่กล้อง';
-
-            // เริ่มวนลูปสแกน
-            setInterval(async () => {
-                // ใช้ tinyFaceDetector ตามไฟล์ที่คุณมี
-                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-                    .withFaceLandmarks()
-                    .withFaceDescriptors();
-                
-                detections.forEach(async d => {
-                    const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-                    
-                    if (bestMatch.label !== 'unknown') {
-                        statusDiv.innerText = '🎯 พบเด็ก: ' + bestMatch.label;
-                        sendDataToSheet(bestMatch.label);
-                    }
-                });
-            }, 1000);
-
-        } catch (error) {
-            statusDiv.style.color = 'red';
-            statusDiv.innerText = '❌ ข้อผิดพลาด: ' + error.message;
-            console.error(error);
+        } catch (err) {
+            statusDiv.innerText = "❌ เกิดข้อผิดพลาด: " + err;
         }
     }
 
-    async function loadImages() {
+    // ฟังก์ชันดึงรูปจาก Google Drive (ผ่าน doGet ใน Apps Script)
+    async function loadImagesFromDrive() {
+        const response = await fetch(SCRIPT_URL);
+        const students = await response.json(); // จะได้ลิสต์ {name, id}
+        
         return Promise.all(
-            LABELS.map(async label => {
+            students.map(async (student) => {
                 const descriptions = [];
                 try {
-                    const img = await faceapi.fetchImage(`./labeled_images/${label}/1.jpg`);
+                    // สร้าง URL รูปภาพตรงๆ จาก Google Drive ID
+                    const imgUrl = `https://drive.google.com/uc?export=view&id=${student.id}`;
+                    const img = await faceapi.fetchImage(imgUrl);
                     const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
-                        .withFaceLandmarks()
-                        .withFaceDescriptor();
-                    
-                    if (detections) {
-                        descriptions.push(detections.descriptor);
-                    }
-                } catch (e) {
-                    console.error(`ไม่สามารถโหลดรูปของ ${label} ได้:`, e);
-                }
-                return new faceapi.LabeledFaceDescriptors(label, descriptions);
+                        .withFaceLandmarks().withFaceDescriptor();
+                    if (detections) descriptions.push(detections.descriptor);
+                } catch (e) { console.error("โหลดรูปไม่สำเร็จ:", student.name); }
+                return new faceapi.LabeledFaceDescriptors(student.name, descriptions);
             })
         );
     }
 
-    async function sendDataToSheet(name) {
-        try {
+    function startScanning(faceMatcher) {
+        setInterval(async () => {
+            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks().withFaceDescriptors();
+            
+            detections.forEach(async d => {
+                const bestMatch = faceMatcher.findBestMatch(d.descriptor);
+                if (bestMatch.label !== 'unknown') {
+                    statusDiv.innerText = "🎯 พบ: " + bestMatch.label;
+                    // ส่งข้อมูลเช็คชื่อไปที่ Sheet
+                    fetch(SCRIPT_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ name: bestMatch.label, status: 'ขึ้นรถ' })
+                    });
+                }
+            });
+        }, 1500);
+    }
+
+    // ฟังก์ชันส่งรูปไปบันทึกใน Drive
+    async function uploadNewStudent() {
+        const name = document.getElementById('newName').value;
+        const fileInput = document.getElementById('filePicker');
+        if (!name || !fileInput.files[0]) return alert("กรุณากรอกชื่อและเลือกรูป");
+
+        statusDiv.innerText = "🚀 กำลังส่งรูปไปที่ Google Drive...";
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const base64Data = e.target.result;
             await fetch(SCRIPT_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ 
-                    id: 'BUS-01', 
-                    name: name, 
-                    status: 'ขึ้นรถ' 
-                })
+                body: JSON.stringify({ action: 'register', name: name, image: base64Data })
             });
-            console.log("บันทึกสำเร็จ: " + name);
-        } catch (e) {
-            console.error("ส่งข้อมูลไม่สำเร็จ", e);
-        }
+            alert("ลงทะเบียนน้อง " + name + " สำเร็จ! ระบบจะรีโหลด");
+            location.reload();
+        };
+        reader.readAsDataURL(fileInput.files[0]);
     }
 
-    // เริ่มทำงานเมื่อโหลดหน้าเว็บเสร็จ
     window.onload = startApp;
-
 </script>
 </body>
 </html>
