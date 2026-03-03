@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบเช็คชื่อสแกนใบหน้าบนรถโรงเรียน</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    
+    <style>
+        body { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            font-family: sans-serif; 
+            background-color: #f4f7f6;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        #status { 
+            margin: 15px 0;
+            font-weight: bold;
+            color: #d93025; /* สีแดงไว้ก่อนจนกว่าจะโหลดเสร็จ */
+        }
+        .video-box {
+            position: relative;
+            background: #000;
+            line-height: 0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        video {
+            width: 100%;
+            max-width: 600px;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚌 ระบบเช็คชื่อสแกนใบหน้า</h2>
+    <div id="status">กำลังรอระบบ...</div>
+
+    <div class="video-box">
+        <video id="video" autoplay muted playsinline></video>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video');
+    const statusDiv = document.getElementById('status');
+    
+    // 1. URL จาก Google Apps Script
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhxsGrq-wUtYwqgp3rlR0JDfYkrM3SMqZ73qzwvQcZalXUZz4S1p4uH-uZrqfnGXM/exec';
+
+    // 2. รายชื่อเด็ก (ชื่อโฟลเดอร์ใน labeled_images)
+    const LABELS = ['Somchai', 'Somsak']; 
+
+    async function startApp() {
+        statusDiv.innerText = '⏳ กำลังโหลด AI (ขั้นตอนนี้อาจใช้เวลาสักครู่)...';
+        
+        try {
+            // เช็คว่า faceapi โหลดมาหรือยัง
+            if (typeof faceapi === 'undefined') {
+                throw new Error("Library face-api ยังโหลดไม่สำเร็จ กรุณาเช็คอินเทอร์เน็ต");
+            }
+
+            // โหลดเฉพาะไฟล์ที่คุณมีในเครื่อง (ตัด ssdMobilenetv1 ออก)
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
+                faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+                faceapi.nets.faceRecognitionNet.loadFromUri('./models')
+            ]);
+
+            statusDiv.innerText = '📷 โหลด AI สำเร็จ! กำลังเปิดกล้อง...';
+            
+            // เปิดกล้อง
+            const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+            video.srcObject = stream;
+
+            // เตรียมข้อมูลใบหน้า
+            statusDiv.innerText = '🔎 กำลังประมวลผลรูปต้นแบบ...';
+            const labeledFaceDescriptors = await loadImages();
+            
+            if (labeledFaceDescriptors.length === 0) {
+                throw new Error("ไม่สามารถโหลดรูปต้นแบบจาก labeled_images ได้");
+            }
+
+            const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+
+            statusDiv.style.color = 'green';
+            statusDiv.innerText = '✅ พร้อมสแกน! กรุณามองที่กล้อง';
+
+            // เริ่มวนลูปสแกน
+            setInterval(async () => {
+                // ใช้ tinyFaceDetector ตามไฟล์ที่คุณมี
+                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                    .withFaceLandmarks()
+                    .withFaceDescriptors();
+                
+                detections.forEach(async d => {
+                    const bestMatch = faceMatcher.findBestMatch(d.descriptor);
+                    
+                    if (bestMatch.label !== 'unknown') {
+                        statusDiv.innerText = '🎯 พบเด็ก: ' + bestMatch.label;
+                        sendDataToSheet(bestMatch.label);
+                    }
+                });
+            }, 1000);
+
+        } catch (error) {
+            statusDiv.style.color = 'red';
+            statusDiv.innerText = '❌ ข้อผิดพลาด: ' + error.message;
+            console.error(error);
+        }
+    }
+
+    async function loadImages() {
+        return Promise.all(
+            LABELS.map(async label => {
+                const descriptions = [];
+                try {
+                    const img = await faceapi.fetchImage(`./labeled_images/${label}/1.jpg`);
+                    const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+                        .withFaceLandmarks()
+                        .withFaceDescriptor();
+                    
+                    if (detections) {
+                        descriptions.push(detections.descriptor);
+                    }
+                } catch (e) {
+                    console.error(`ไม่สามารถโหลดรูปของ ${label} ได้:`, e);
+                }
+                return new faceapi.LabeledFaceDescriptors(label, descriptions);
+            })
+        );
+    }
+
+    async function sendDataToSheet(name) {
+        try {
+            await fetch(SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ 
+                    id: 'BUS-01', 
+                    name: name, 
+                    status: 'ขึ้นรถ' 
+                })
+            });
+            console.log("บันทึกสำเร็จ: " + name);
+        } catch (e) {
+            console.error("ส่งข้อมูลไม่สำเร็จ", e);
+        }
+    }
+
+    // เริ่มทำงานเมื่อโหลดหน้าเว็บเสร็จ
+    window.onload = startApp;
+
+</script>
+</body>
+</html>
