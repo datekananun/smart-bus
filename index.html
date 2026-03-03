@@ -3,15 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบเช็คชื่อรถโรงเรียน</title>
+    <title>Smart Bus System</title>
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; padding: 20px; }
-        .container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 500px; text-align: center; }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; margin: 0; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 500px; text-align: center; position: relative; }
         video { width: 100%; border-radius: 10px; background: #000; }
-        #status { margin: 15px 0; padding: 10px; font-weight: bold; border-radius: 8px; background: #e8f0fe; }
-        .student-list { margin-top: 20px; text-align: left; }
-        .tag { display: inline-block; padding: 5px 10px; margin: 3px; border-radius: 15px; background: #fee2e2; color: #dc2626; font-size: 14px; border: 1px solid #fecaca; }
+        #status { margin: 15px 0; padding: 10px; font-weight: bold; border-radius: 8px; background: #e8f0fe; min-height: 20px; }
+        .tag { display: inline-block; padding: 5px 10px; margin: 3px; border-radius: 15px; background: #fee2e2; color: #dc2626; font-size: 13px; border: 1px solid #fecaca; }
+        
+        /* สไตล์ตัว Loading */
+        #loading-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.8); z-index: 1000; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db;
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
         .reg-box { margin-top: 20px; padding: 15px; border-top: 1px solid #eee; background: #fafafa; border-radius: 10px; }
         input, button { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ddd; }
         button { background: #059669; color: white; border: none; cursor: pointer; }
@@ -19,22 +30,24 @@
 </head>
 <body>
 
+<div id="loading-overlay">
+    <div class="spinner"></div>
+    <p style="font-weight:bold; margin-top:10px;">กำลังประมวลผล...</p>
+</div>
+
 <div class="container">
-    <h2>🚌 เช็คชื่อรอบ เช้า/เย็น</h2>
-    <div id="status">กำลังโหลดระบบ AI...</div>
+    <h2>🚌 เช็คชื่อรถโรงเรียน</h2>
+    <div id="status">กำลังเริ่มต้น AI...</div>
+    <video id="video" autoplay muted playsinline></video>
 
-    <div style="position: relative; line-height: 0;">
-        <video id="video" autoplay muted playsinline></video>
-    </div>
-
-    <div class="student-list">
-        <strong>📍 รายชื่อที่ยังไม่เช็คชื่อ:</strong>
-        <div id="missing-list" style="margin-top:10px;"></div>
+    <div style="text-align:left; margin-top:20px;">
+        <strong>📍 ยังไม่มา:</strong>
+        <div id="missing-list"></div>
     </div>
 
     <div class="reg-box">
-        <h4>➕ ลงทะเบียนเด็กใหม่</h4>
-        <input type="text" id="newName" placeholder="ชื่อเล่นเด็ก">
+        <h4>➕ ลงทะเบียนใหม่</h4>
+        <input type="text" id="newName" placeholder="ชื่อเล่น">
         <input type="file" id="filePicker" accept="image/*">
         <button onclick="uploadNew()">บันทึกข้อมูล</button>
     </div>
@@ -44,34 +57,31 @@
     const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhxsGrq-wUtYwqgp3rlR0JDfYkrM3SMqZ73qzwvQcZalXUZz4S1p4uH-uZrqfnGXM/exec';
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
+    const loader = document.getElementById('loading-overlay');
     let pendingStudents = [];
 
     async function init() {
+        showLoader(true);
         try {
-            // โหลด Models
             await Promise.all([
                 faceapi.nets.tinyFaceDetector.loadFromUri('./models'),
                 faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
                 faceapi.nets.faceRecognitionNet.loadFromUri('./models')
             ]);
-            
-            // เปิดกล้อง
             const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
             video.srcObject = stream;
-
-            statusDiv.innerText = "🔎 กำลังดึงข้อมูลจากระบบ...";
             const descriptors = await loadFromDrive();
-            
             if (descriptors.length > 0) {
                 pendingStudents = descriptors.map(d => d.label);
                 updateUI();
                 const faceMatcher = new faceapi.FaceMatcher(descriptors, 0.55);
-                statusDiv.innerText = "✅ พร้อมสแกนหน้า";
+                statusDiv.innerText = "✅ พร้อมใช้งาน";
                 startScan(faceMatcher);
             } else {
-                statusDiv.innerText = "⚠️ ยังไม่มีเด็กในระบบ กรุณาลงทะเบียน";
+                statusDiv.innerText = "📢 กรุณาลงทะเบียนเด็กใหม่";
             }
-        } catch (e) { statusDiv.innerText = "❌ เกิดข้อผิดพลาด: " + e; }
+        } catch (e) { statusDiv.innerText = "❌ Error: " + e; }
+        showLoader(false);
     }
 
     async function loadFromDrive() {
@@ -83,16 +93,14 @@
                 const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                 return det ? new faceapi.LabeledFaceDescriptors(s.name, [det.descriptor]) : null;
             } catch (err) { return null; }
-        })).then(results => results.filter(r => r !== null));
+        })).then(res => res.filter(r => r !== null));
     }
 
-    function updateUI() {
-        const list = document.getElementById('missing-list');
-        list.innerHTML = pendingStudents.map(s => `<span class="tag">${s}</span>`).join('');
-    }
+    function showLoader(show) { loader.style.display = show ? 'flex' : 'none'; }
+    function updateUI() { document.getElementById('missing-list').innerHTML = pendingStudents.map(s => `<span class="tag">${s}</span>`).join(''); }
 
     function speak(name) {
-        const utter = new SpeechSynthesisUtterance("พบคุณ " + name + " ขึ้นรถเรียบร้อยแล้วค่ะ");
+        const utter = new SpeechSynthesisUtterance("พบคุณ " + name + " ค่ะ");
         utter.lang = 'th-TH';
         window.speechSynthesis.speak(utter);
     }
@@ -100,30 +108,30 @@
     function startScan(faceMatcher) {
         setInterval(async () => {
             const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
-            detections.forEach(d => {
+            detections.forEach(async d => {
                 const match = faceMatcher.findBestMatch(d.descriptor);
                 if (match.label !== 'unknown' && pendingStudents.includes(match.label)) {
-                    speak(match.label); // พูดชื่อไทย
-                    pendingStudents = pendingStudents.filter(s => s !== match.label); // ลบออกจากรายการแดง
+                    const nameFound = match.label;
+                    pendingStudents = pendingStudents.filter(s => s !== nameFound);
                     updateUI();
-                    statusDiv.innerText = "🎯 พบ: " + match.label;
-                    // บันทึกลง Google Sheet
-                    fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ name: match.label }) });
+                    speak(nameFound);
+                    statusDiv.innerText = "🎯 พบ: " + nameFound;
+                    await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ name: nameFound }) });
                 }
             });
-        }, 1500);
+        }, 2000);
     }
 
     async function uploadNew() {
         const name = document.getElementById('newName').value;
         const file = document.getElementById('filePicker').files[0];
-        if(!name || !file) return alert("กรุณาใส่ชื่อและเลือกรูป");
+        if(!name || !file) return alert("ใส่ชื่อและเลือกรูป");
         
-        statusDiv.innerText = "🚀 กำลังบันทึกข้อมูล...";
+        showLoader(true);
         const reader = new FileReader();
         reader.onload = async (e) => {
             await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action:'register', name: name, image: e.target.result }) });
-            alert("บันทึกสำเร็จ!"); 
+            alert("บันทึก " + name + " สำเร็จ!");
             location.reload();
         };
         reader.readAsDataURL(file);
@@ -133,4 +141,3 @@
 </script>
 </body>
 </html>
-
